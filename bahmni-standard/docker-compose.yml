@@ -1,0 +1,336 @@
+version: '3.7'
+
+x-default-logging: &default
+  {}
+
+x-loki-logging: &loki
+  driver: loki
+  options:
+    loki-url: http://localhost:3100/loki/api/v1/push
+    mode: non-blocking
+    max-buffer-size: 4m
+    loki-retries: "3"
+
+x-log-config: &log-config
+  # update this value to *loki if needed to see logs in grafana dashboard.
+  <<: *default
+
+
+services:
+
+  proxy:
+    image: 'bahmni/proxy:${PROXY_IMAGE_TAG:?}'
+  #  volumes:
+  #     - "${eRegister_DevOps:?}/Certificates:/etc/tls"
+    ports:
+      - '80:80'
+      - '443:443'
+    logging: *log-config
+
+  bahmni-config:
+    image: 'bahmni/default-config:${CONFIG_IMAGE_TAG:?}'
+    volumes:
+      - "${eRegister_DevOps:?}/emr/bahmni_config:/usr/local/bahmni_config"
+    logging: *log-config
+
+  odoo:
+    profiles: ["odoo","bahmni-standard"]
+    image: 'bahmni/odoo-10:${ODOO_IMAGE_TAG:?[ERROR]}'
+    ports:
+      - '8069:8069'
+    volumes:
+      - odooappdata:/var/lib/odoo
+      - ${EXTRA_ADDONS_PATH}:/mnt/extra-addons
+      # # Uncomment the below volume only when you need to modify existing bahmni-addons. Also make sure to update the .env file variable with odoo-modules github repo cloned path.
+      # - ${BAHMNI_ODOO_MODULES_PATH}:/opt/bahmni-erp/bahmni-addons
+    depends_on:
+      odoodb:
+        condition: service_healthy
+    environment:
+      HOST: odoodb
+      USER: ${ODOO_DB_USER}
+      PASSWORD: ${ODOO_DB_PASSWORD}
+    logging: *log-config
+
+  odoodb:
+    profiles: ["odoo","bahmni-standard"]
+    image: '${ODOO_DB_IMAGE_NAME:?[ERROR]}'
+    volumes:
+      - '${ODOO_DB_DUMP_PATH}:/resources/db-dump'
+      - 'odoodbdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U odoo']
+      interval: 10s
+      timeout: 5s
+    environment:
+      POSTGRES_DB: ${ODOO_DB_NAME:?}
+      POSTGRES_PASSWORD: ${ODOO_DB_PASSWORD}
+      POSTGRES_USER: ${ODOO_DB_USER}
+    logging: *log-config
+
+  odoo-connect:
+    profiles: ["odoo","bahmni-standard"]
+    image: 'bahmni/odoo-connect:${ODOO_CONNECT_IMAGE_TAG:?[ERROR]}'
+    environment:
+      ODOO_DB_SERVER: odoodb
+      ODOO_DB_USERNAME: ${ODOO_DB_USER:?}
+      ODOO_DB_PASSWORD: ${ODOO_DB_PASSWORD:?}
+      OPENMRS_HOST: ${OPENMRS_HOST:?}
+      OPENMRS_PORT: ${OPENMRS_PORT:?}
+      OPENMRS_ATOMFEED_USER: ${OPENMRS_ATOMFEED_USER:?}
+      OPENMRS_ATOMFEED_PASSWORD: ${OPENMRS_ATOMFEED_PASSWORD:?}
+      ODOO_HOST: ${ODOO_HOST:?}
+      ODOO_PORT: ${ODOO_PORT:?}
+      ODOO_ATOMFEED_USER: ${ODOO_ATOMFEED_USER:?}
+      ODOO_ATOMFEED_PASSWORD: ${ODOO_ATOMFEED_PASSWORD:?}
+    depends_on:
+      odoodb:
+        condition: service_healthy
+    logging: *log-config
+
+  openmrs:
+    profiles: ["emr","bahmni-standard", "bahmni-mart"]
+    image: bahmni/openmrs:${OPENMRS_IMAGE_TAG:?}
+    environment:
+      OMRS_DB_NAME: ${OPENMRS_DB_NAME:?}
+      OMRS_DB_HOSTNAME: ${OPENMRS_DB_HOST:?}
+      OMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      OMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+      OMRS_CREATE_TABLES: ${OPENMRS_DB_CREATE_TABLES}
+      OMRS_AUTO_UPDATE_DATABASE: ${OPENMRS_DB_AUTO_UPDATE}
+      OMRS_MODULE_WEB_ADMIN: ${OPENMRS_MODULE_WEB_ADMIN}
+      # OMRS_DEV_DEBUG_PORT: ${OMRS_DEV_DEBUG_PORT}
+      OMRS_JAVA_SERVER_OPTS: ${OMRS_JAVA_SERVER_OPTS}
+      OMRS_JAVA_MEMORY_OPTS: ${OMRS_JAVA_MEMORY_OPTS}
+      SEND_MAIL: ${SEND_MAIL}
+      MAIL_TRANSPORT_PROTOCOL: ${MAIL_TRANSPORT_PROTOCOL}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH}
+      MAIL_SMTP_STARTTLS_ENABLE: ${MAIL_SMTP_STARTTLS_ENABLE}
+      MAIL_SMTP_SSL_ENABLE: ${MAIL_SMTP_SSL_ENABLE}
+      MAIL_DEBUG: ${MAIL_DEBUG}
+      MAIL_FROM: ${MAIL_FROM}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      OMRS_DOCKER_ENV: ${OPENMRS_DOCKER_ENV}
+      OMRS_C3P0_MAX_SIZE: ${OMRS_C3P0_MAX_SIZE}
+      OMRS_DB_EXTRA_ARGS: ${OMRS_DB_EXTRA_ARGS}
+    #ports:
+      # - ${OMRS_DEV_DEBUG_PORT}:${OMRS_DEV_DEBUG_PORT}
+    volumes:
+      - "${eRegister_DevOps:?}/emr/bahmni_config:/etc/bahmni_config/"
+      - "${eRegister_DevOps:?}/emr/lab_results:/home/bahmni/uploaded_results"
+      - "${eRegister_DevOps:?}/emr/uploaded-files:/home/bahmni/uploaded-files"
+     # - "${eRegister_DevOps:?}/emr/openmrs/modules/:/openmrs/data/modules/"
+      - "${eRegister_DevOps:?}/emr/patient_images:/home/bahmni/patient_images"
+      - "${eRegister_DevOps:?}/emr/document_images:/home/bahmni/document_images"
+      - "${eRegister_DevOps:?}/emr/clinical_forms:/home/bahmni/clinical_forms"
+      - "${eRegister_DevOps:?}/emr/configuration_checksums:/openmrs/data/configuration_checksums"
+      - "${eRegister_DevOps:?}/emr/sms-token:/openmrs/data/sms-token"
+    depends_on:
+      - openmrsdb
+    logging: *log-config
+
+  openmrsdb:
+    image: ${OPENMRS_DB_IMAGE_NAME:?}
+    restart: always
+    profiles: ["emr","bahmni-standard", "metabase", "bahmni-mart"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${OPENMRS_DB_NAME:?}
+      MYSQL_USER: ${OPENMRS_DB_USERNAME:?}
+      MYSQL_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+    volumes:
+      - "${eRegister_DevOps:?}/emr/openmrsdbdata:/var/lib/mysql"
+    logging: *log-config
+
+  metabasedb:
+    image: postgres:${METABASE_POSTGRES_IMAGE_TAG:?}
+    restart: on-failure:[3]
+    profiles: ["metabase", "bahmni-mart", "bahmni-standard"]
+    environment:
+      POSTGRES_DB: ${METABASE_DB_NAME:?}
+      POSTGRES_USER: ${METABASE_DB_USER:?}
+      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD:?}
+    volumes:
+      - "${eRegister_DevOps:?}/metabasedata:/var/lib/postgresql/data"
+
+  metabase:
+    image: bahmni/bahmni-metabase:${METABASE_IMAGE_TAG:?}
+    restart: on-failure:[3]
+    profiles: ["metabase", "bahmni-mart", "bahmni-standard"]
+    environment:
+      MB_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:?}
+      MB_ADMIN_FIRST_NAME: ${METABASE_ADMIN_FIRST_NAME:?}
+      MB_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:?}
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${METABASE_DB_NAME:?}
+      MB_DB_PORT:  ${METABASE_DB_PORT:?}
+      MB_DB_USER: ${METABASE_DB_USER:?}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:?}
+      MB_DB_HOST: ${METABASE_DB_HOST:?}
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:?}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:?}
+      OPENMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+      MART_DB_HOST: ${MART_DB_HOST:?}
+      MART_DB_NAME: ${MART_DB_NAME:?}
+      MART_DB_USERNAME: ${MART_DB_USERNAME:?}
+      MART_DB_PASSWORD: ${MART_DB_PASSWORD:?}
+    depends_on:
+     - metabasedb
+
+  martdb:
+    image: postgres:${BAHMNI_MART_DB_IMAGE_TAG:?}
+    profiles: ["bahmni-mart","bahmni-standard"]
+    environment:
+      POSTGRES_DB: ${MART_DB_NAME:?}
+      POSTGRES_USER: ${MART_DB_USERNAME:?}
+      POSTGRES_PASSWORD: ${MART_DB_PASSWORD:?}
+    volumes:
+      - "${eRegister_DevOps:?}/mart-data:/var/lib/postgresql/data"
+
+  mart:
+    image: bahmni/bahmni-mart:${BAHMNI_MART_IMAGE_TAG:?}
+    profiles: ["bahmni-mart", "bahmni-standard"]
+    environment:
+      CRON_TIME: ${MART_CRON_TIME:?}
+      MART_DB_HOST: ${MART_DB_HOST:?}
+      MART_DB_NAME: ${MART_DB_NAME:?}
+      MART_DB_USERNAME: ${MART_DB_USERNAME:?}
+      MART_DB_PASSWORD: ${MART_DB_PASSWORD:?}
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:?}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:?}
+      OPENMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+    depends_on:
+     - martdb
+     - openmrsdb
+     - openmrs
+    volumes:
+     - "${eRegister_DevOps:?}/emr/clinical_forms:/home/bahmni/clinical_forms"
+
+  bahmni-web:
+    image: bahmni/bahmni-web:${BAHMNI_WEB_IMAGE_TAG:?}
+    profiles: ["emr","bahmni-standard","bahmni-mart"]
+    volumes:
+      - "${eRegister_DevOps:?}/emr/bahmni_config:/usr/local/apache2/htdocs/bahmni_config/"
+      - "${eRegister_DevOps:?}/emr/openmrs-module-bahmniapps/ui/app/:/usr/local/apache2/htdocs/bahmni"
+      - "${eRegister_DevOps:?}/emr/openmrs-module-bahmniapps/ui/node_modules/@bower_components/:/usr/local/apache2/htdocs/bahmni/components"
+    logging: *log-config
+
+  implementer-interface:
+    image: bahmni/implementer-interface:${IMPLEMENTER_INTERFACE_IMAGE_TAG:?}
+    profiles: ["implementer-interface","emr","bahmni-standard"]
+ #   volumes:
+ #     - "${eRegister_DevOps:?}/emr/implementer_interface/dist:/usr/local/apache2/htdocs/implementer_interface"
+    depends_on:
+      - openmrs
+    logging: *log-config
+
+  reports:
+    image: bahmni/reports:${REPORTS_IMAGE_TAG:?}
+    profiles: ["reports","bahmni-standard"]
+    environment:
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:?}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:?}
+      OPENMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+      OPENMRS_HOST: ${OPENMRS_HOST:?}
+      OPENMRS_PORT: ${OPENMRS_PORT:?}
+      OPENELIS_DB_SERVER: ${OPENELIS_DB_SERVER}
+      REPORTS_DB_SERVER: reportsdb
+      REPORTS_DB_NAME: ${REPORTS_DB_NAME:?}
+      REPORTS_DB_USERNAME: ${REPORTS_DB_USERNAME:?}
+      REPORTS_DB_PASSWORD: ${REPORTS_DB_PASSWORD:?}
+      ODOO_DB_SERVER: ${ODOO_DB_HOST:?}
+      ODOO_DB_NAME: ${ODOO_DB_NAME:?}
+      ODOO_DB_USERNAME: ${ODOO_DB_USER:?}
+      ODOO_DB_PASSWORD: ${ODOO_DB_PASSWORD:?}
+    volumes:
+      - "${eRegister_DevOps:?}/emr/bahmni_config:/etc/bahmni_config/"
+      - "${eRegister_DevOps:?}/reports/queued-reports:/home/bahmni/reports"
+    depends_on:
+      - reportsdb
+      - openmrsdb
+      - bahmni-web
+    logging: *log-config
+
+  reportsdb:
+    platform: linux/amd64
+    image: mysql:5.7
+    profiles: ["reports","bahmni-standard"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${REPORTS_DB_NAME:?}
+      MYSQL_USER: ${REPORTS_DB_USERNAME:?}
+      MYSQL_PASSWORD: ${REPORTS_DB_PASSWORD:?}
+    volumes:
+      - "${eRegister_DevOps:?}/reports/reportsdbdata:/var/lib/mysql"
+    logging: *log-config
+
+  patient-documents:
+    image: 'bahmni/patient-documents:${PATIENT_DOCUMENTS_TAG:?}'
+    profiles: ["emr","bahmni-standard"]
+    volumes:
+      - "${eRegister_DevOps:?}/emr/document_images:/usr/share/nginx/html/document_images"
+      - "${eRegister_DevOps:?}/emr/lab_results:/usr/share/nginx/html/uploaded_results"
+      - "${eRegister_DevOps:?}/emr/uploaded-files:/usr/share/nginx/html/uploaded-files"
+    environment:
+      - OPENMRS_HOST=${OPENMRS_HOST:?}
+    depends_on:
+      - openmrs
+    logging: *log-config
+
+  appointments:
+    image: bahmni/appointments:${APPOINTMENTS_IMAGE_TAG:?}
+    profiles: ["emr","bahmni-standard"]
+ #   volumes:
+ #    - "${eRegister_DevOps:?}/emr/appointments/dist/:/usr/local/apache2/htdocs/appointments"
+
+  atomfeed-console:
+    image: bahmni/atomfeed-console:latest
+    profiles: ["atomfeed-console"]
+    environment:
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME}
+      OPENMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD}
+      ODOO_DB_HOST: ${ODOO_DB_HOST}
+      ODOO_DB_NAME: ${ODOO_DB_NAME}
+      ODOO_DB_USER: ${ODOO_DB_USER}
+      ODOO_DB_PASSWORD: ${ODOO_DB_PASSWORD}
+
+  sms-service:
+    image: bahmni/sms-service:${SMS_SERVICE_IMAGE_TAG:?}
+    profiles: ["sms","bahmn-standard"]
+    environment:
+      SMS_TOKEN: ${SMS_TOKEN}
+      SMS_ORIGINATOR: ${SMS_ORIGINATOR}
+      SMS_PROVIDER_API: ${SMS_PROVIDER_API}
+      SMS_OPENMRS_HOST: ${OPENMRS_HOST:?}
+      SMS_OPENMRS_PORT: ${OPENMRS_PORT:?}
+      SMS_COUNTRY_CODE: ${SMS_COUNTRY_CODE}
+    volumes:
+      - "${eRegister_DevOps:?}/emr/sms-token:/opt/tokens"
+
+  restore_volumes:
+    image: bash:5.2.15
+    profiles: ["restore"]
+    command: "bash /restore_docker_volumes.sh"
+    volumes:
+        - "${RESTORE_ARTIFACTS_PATH}:/restore-artifacts"
+        - '../backup_restore/restore_docker_volumes.sh:/restore_docker_volumes.sh'
+        - "${eRegister_DevOps:?}/emr/patient_images:/mounts/bahmni-patient-images"
+        - "${eRegister_DevOps:?}/emr/document_images:/mounts/bahmni-document-images"
+        - "${eRegister_DevOps:?}/emr/clinical_forms:/mounts/bahmni-clinical-forms"
+        - "${eRegister_DevOps:?}/emr/lab_results:/mounts/bahmni-lab-results"
+        - "${eRegister_DevOps:?}/reports/queued-reports:/mounts/bahmni-queued-reports"
+        - "${eRegister_DevOps:?}/emr/uploaded-files:/mounts/bahmni-uploaded-files"
+#        - 'dcm4chee-archive:/mounts/dcm4chee-archive'
+        - "${eRegister_DevOps:?}/emr/configuration_checksums:/mounts/configuration_checksums"
+volumes:
+  odoodbdata:
+  odooappdata:
+
