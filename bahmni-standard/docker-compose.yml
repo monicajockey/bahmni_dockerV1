@@ -30,7 +30,7 @@ services:
   bahmni-config:
     image: 'bahmni/default-config:${CONFIG_IMAGE_TAG:?}'
     volumes:
-      - "${eRegister_DevOps:?}/emr/bahmni_config:/usr/local/bahmni_config"
+      - "${eRegister_DevOps:?}/emr/bahmni_config:/devops/emr/bahmni_config"
     logging: *log-config
 
   odoo:
@@ -291,7 +291,7 @@ services:
 
   atomfeed-console:
     image: bahmni/atomfeed-console:latest
-    profiles: ["atomfeed-console"]
+    profiles: ["atomfeed-console", "bahmni-standard"]
     environment:
       OPENMRS_DB_HOST: ${OPENMRS_DB_HOST}
       OPENMRS_DB_NAME: ${OPENMRS_DB_NAME}
@@ -304,7 +304,7 @@ services:
 
   sms-service:
     image: bahmni/sms-service:${SMS_SERVICE_IMAGE_TAG:?}
-    profiles: ["sms","bahmn-standard"]
+    profiles: ["sms","bahmni-standard"]
     environment:
       SMS_TOKEN: ${SMS_TOKEN}
       SMS_ORIGINATOR: ${SMS_ORIGINATOR}
@@ -328,7 +328,6 @@ services:
         - "${eRegister_DevOps:?}/emr/lab_results:/mounts/bahmni-lab-results"
         - "${eRegister_DevOps:?}/reports/queued-reports:/mounts/bahmni-queued-reports"
         - "${eRegister_DevOps:?}/emr/uploaded-files:/mounts/bahmni-uploaded-files"
-#        - 'dcm4chee-archive:/mounts/dcm4chee-archive'
         - "${eRegister_DevOps:?}/emr/configuration_checksums:/mounts/configuration_checksums"
 volumes:
   odoodbdata:
